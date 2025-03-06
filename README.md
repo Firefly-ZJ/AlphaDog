@@ -1,7 +1,5 @@
 # AlphaDog: A Gomoku AI Inspired by AlphaGo
 
-## NOTE: This project has not finished yet.
-
 ## Overview
 
 AlphaDog is a Gomoku (Five in a Row) AI inspired by the AlphaGo series. It uses a combination of deep neural networks and Monte Carlo Tree Search (MCTS) to play Gomoku, and is trained through Reinforcement Learning and self-play data.
@@ -18,12 +16,21 @@ AlphaDog 是一个受 AlphaGo 系列启发的五子棋 AI。它结合了深度�
 ## Usage
 
 - **Training**: To train the AI model, run the `_AlphaDog.py` script. You can adjust hyperparameters.
-- To have faster training, try the `_AlphaDog_para.py` script. It supports parallel self-play to accelerate training. Make sure your device support CUDA and multiprocessing.
-- **Playing**: To play against AI or check AI performance, run the `WZQ_Pygame.py` script. You can try PvP/PvC/CvC. Pre-trained models are in folder `Trained`.
+- To have faster training, try the `_AlphaDog_para.py` script, which supports parallel self-play to accelerate training. Make sure your device support CUDA and multiprocessing.
+- **Playing**: To play against AI or check AI performance, run the `GMK_Pygame.py` script. You can try PvP/PvC/CvC. You may set param `useMCTS` to decide whether AI uses MCTS when playing.
+- Pre-trained models are in folder `Trained`.
 
 - **训练**：运行 `_AlphaDog.py` 脚本来训练 AI 模型。你可以调整超参数。
 - 可以通过运行 `_AlphaDog_para.py` 脚本来实现更快速的训练。它可以通过并行地自我对弈来加速训练。请确保你的设备支持 CUDA 和 multiprocessing。
-- **对弈**：运行 `WZQ_Pygame.py` 脚本来与 AI 对弈或者观察 AI 表现。你可以选择PvP、PvC或者CvC。训练好的模型参数在 `Trained` 文件夹。
+- **对弈**：运行 `GMK_Pygame.py` 脚本来与 AI 对弈或者观察 AI 表现。你可以选择PvP、PvC或者CvC。可以设置 `useMCTS` 参数来决定 AI 是否在对弈中使用 MCTS。
+- 训练好的模型参数在 `Trained` 文件夹。
+
+## About training
+
+During training, init `lr` and `batch_size` are set to 1e-3 and 256.
+
+`eps` for Dirichlet noise is set to 0.2. Flip and rotation are used for data augmentation.
+Data buffer is cleared every 5 epoches.
 
 ## License
 
