@@ -5,6 +5,7 @@ import torch
 #####     Node     #####
 class Node():
     def __init__(self, priorProb:float=1.0, isWin:bool=False):
+        """Node of M-C Search Tree"""
         self.isValid = True # 有效节点
         self.children = dict()  # 子节点: key-Position, value-ChildNode
         self.visitCount = 0  # 该节点的访问次数
@@ -28,9 +29,9 @@ class Node():
         return probs # [sz*sz]
 
 class InvalidNode(Node):
-    """Invalid Move Node (no children)"""
     __slots__ = ("visitCount", "isValid")
     def __init__(self):
+        """Invalid Move Node (no children)"""
         self.isValid = False # 无效节点
         self.visitCount = 0
     
@@ -39,10 +40,11 @@ class InvalidNode(Node):
 
 #####     MCTS     #####
 class MCTS():
-    """Monte-Carlo Tree Search"""
-    def __init__(self, model, num_simulations:int=100, device=None):
-        """:param model: Policy-Value Network
-        :param num_simulations: simulations per search
+    def __init__(self, model, num_simulations:int=200, device=None):
+        """Monte-Carlo Tree Search
+        Args:
+            model: Policy-Value Network
+            num_simulations: simulations per search
         """
         self.Model = model # Policy-Value Network
         self.Root = Node() # Root Node
@@ -50,8 +52,8 @@ class MCTS():
         self.dv = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.Simulations = num_simulations # Simulations per Search
         ### Hyper-parameters
-        self.gamma = 0.95 # Discount Factor for Future Rewards
-        self.c_puct = 3 # PUCT Exploration param: U(s,a) = c_puct * P(s,a) * sqrt(sum(N(s))) / (1+N(s,a))
+        self.gamma = 0.99 # Discount Factor for Future Rewards
+        self.c_puct = 5 # PUCT Exploration param: U(s,a) = c_puct * P(s,a) * sqrt(sum(N(s))) / (1+N(s,a))
     
     def setHyper(self, **kwargs):
         """:param kwargs: Hypers (simu, c_puct, noise, eps, tem)"""
@@ -69,8 +71,10 @@ class MCTS():
     
     def search(self, board) -> np.ndarray:
         """Search for action probs by MCTS
-        :param board : 当前棋盘。
-        :return: 动作概率分布（根据子节点的访问次数计算）。
+        Args:
+            board: 当前棋盘
+        Returns:
+            动作概率分布（根据子节点的访问次数计算）
         """
         start:Node = self.Root # 起始节点
         for move in board.moves:
@@ -99,7 +103,7 @@ class MCTS():
             board_.placeStone(pos//board_.Size, pos%board_.Size)
         # Expand and Backup
         if node.isWin:
-            self.backup(2, searchPath)
+            self.backup(1, searchPath)
         else:
             policy, value = self.evalState(board_.getStateAsT().to(self.dv))
             policy = torch.exp(policy.squeeze()) # logSoftmax -> Prob
