@@ -17,37 +17,37 @@ from _MCTS import *
 
 #####     Dataset     #####
 class Dataset():
-    """Data buffer for training"""
     def __init__(self, device, capacity:int=100000):
-        self.memory = deque(maxlen=capacity)
+        """Data buffer for training"""
+        self.buffer = deque(maxlen=capacity)
         self.capacity = capacity
         self.dv = device
 
     def __len__(self):
-        return len(self.memory)
+        return len(self.buffer)
 
     def clear(self):
         """Clear the data buffer"""
-        self.memory = deque(maxlen=self.capacity)
+        self.buffer.clear()
     
-    def push(self, state:torch.Tensor, mctsProb:torch.Tensor, result):
-        """Put data into dataset (data augmentation: rotation & flip)"""
+    def push(self, state:torch.Tensor, mctsProb:torch.Tensor, result:int):
+        """Put data into dataset (DA: rotation & flip)"""
         size = state.shape[-1]
         state = state.squeeze(0) # [1, C, sz, sz] -> [C, sz, sz]
         mctsProb = mctsProb.reshape(size, size) # [sz*sz] -> [sz, sz] -> [sz*sz]
         for k in range(4): # Rotation * 4
             S_ = torch.rot90(state, k, dims=(-2,-1))
             P_ = torch.rot90(mctsProb, k, dims=(-2,-1)).reshape(-1)
-            self.memory.append((S_, P_, result))
+            self.buffer.append((S_, P_, result))
         state, mctsProb = torch.flip(state, dims=(-1,)), torch.flip(mctsProb, dims=(-1,))
         for k in range(4): # Rotation * 4
             S_ = torch.rot90(state, k, dims=(-2,-1))
             P_ = torch.rot90(mctsProb, k, dims=(-2,-1)).reshape(-1)
-            self.memory.append((S_, P_, result))
+            self.buffer.append((S_, P_, result))
 
     def sample(self, batchSize:int):
         """Sample a batch randomly"""
-        batch = random.sample(self.memory, batchSize)
+        batch = random.sample(self.buffer, batchSize)
         states, mctsProbs, results = zip(*batch)
         states = torch.stack([s for s in states]).to(self.dv) # [C, sz, sz] -> [B, C, sz, sz]
         mctsProbs = torch.stack([p for p in mctsProbs]).to(self.dv) # [sz*sz] -> [B, sz*sz]
@@ -56,14 +56,13 @@ class Dataset():
 
 #####     Nural Network     #####
 class ResBlock(nn.Module):
-    """Residual Block (inChnl=outChnl)"""
     def __init__(self, chnls:int, knSize:int=5):
+        """Residual Block (inChnl=outChnl)"""
         super().__init__()
-        padding = (knSize-1) // 2
-        self.conv1 = nn.Conv2d(chnls, chnls, knSize, padding=padding) # 5*5大卷积核，接归一化
+        self.conv1 = nn.Conv2d(chnls, chnls, knSize, padding="same") # 5*5大卷积核，接归一化
         self.bn = nn.BatchNorm2d(chnls) # Batch Norm
-        self.conv2 = nn.Conv2d(chnls, chnls*2, 1) # 1*1卷积核，接ReLU
-        self.conv3 = nn.Conv2d(chnls*2, chnls, 1) # 1*1卷积核
+        self.conv2 = nn.Conv2d(chnls, chnls*4, 1) # 1*1卷积核，接ReLU
+        self.conv3 = nn.Conv2d(chnls*4, chnls, 1) # 1*1卷积核
 
     def forward(self, x): # f(x) = h(x) + x
         h = self.bn(self.conv1(x))
@@ -72,21 +71,22 @@ class ResBlock(nn.Module):
         return h + x
 
 class GomokuNet(nn.Module):
-    """Gomoku neural network: State -> Policy, Value"""
     def __init__(self, size=16):
+        """Gomoku neural network: State -> Policy, Value"""
         super().__init__()
         self.size = size
-        self.convIn = nn.Sequential(nn.Conv2d(5, 64, kernel_size=9, padding=4), nn.BatchNorm2d(64),
-                                    nn.Conv2d(64, 128, kernel_size=1), nn.ReLU())
-        self.res = nn.Sequential(ResBlock(128, 5),
-                                 ResBlock(128, 5),
-                                 ResBlock(128, 5)) # ResBlocks * 3
+        self.convIn = nn.Sequential(nn.Conv2d(4, 96, kernel_size=9, padding="same"),
+                                    nn.BatchNorm2d(96))
+        self.res = nn.Sequential(ResBlock(96, knSize=5),
+                                 ResBlock(96, knSize=5),
+                                 ResBlock(96, knSize=5),
+                                 ResBlock(96, knSize=5)) # ResBlocks * 4
         
-        self.convP = nn.Sequential(nn.Conv2d(128, 2, kernel_size=1),
+        self.convP = nn.Sequential(nn.Conv2d(96, 2, kernel_size=1),
                                    nn.BatchNorm2d(2), nn.ReLU())
         self.fcP = nn.Linear(2*size*size, size*size)
         
-        self.convV = nn.Sequential(nn.Conv2d(128, 1, kernel_size=1),
+        self.convV = nn.Sequential(nn.Conv2d(96, 1, kernel_size=1),
                                    nn.BatchNorm2d(1), nn.ReLU())
         self.fcV = nn.Sequential(nn.Linear(size*size, 128), nn.ReLU(),
                                  nn.Linear(128, 1))
@@ -107,8 +107,8 @@ class GomokuNet(nn.Module):
 
 #####     AlphaDog     #####
 class AlphaDog(_Player.PLAYER):
-    """AlphaDog: A Gomoku AI Imitating AlphaZero"""
     def __init__(self, side=1, size=16, modelPath=None, device=None):
+        """AlphaDog: A Gomoku AI Inspired By AlphaZero"""
         super().__init__(side, name="AlphaDog", mode="AI")
         self.Size = size # board size
         self.dv = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -116,9 +116,9 @@ class AlphaDog(_Player.PLAYER):
         self.Net = GomokuNet(size=16).to(self.dv)
         if modelPath: self.Net.load_state_dict(torch.load(modelPath, weights_only=True))
         self.MCTS = MCTS(self.Net, num_simulations=400, device=self.dv)
-        self.Memory = Dataset(self.dv, capacity=80000)
+        self.Memory = Dataset(self.dv, capacity=40000)
 
-        self.tem = 1.05
+        self.tem = 1.01
         self.noise = True
         self.eps = 0.2
     
@@ -137,7 +137,7 @@ class AlphaDog(_Player.PLAYER):
         if moveCount <= addTem: pass
         else:
             temperature = self.tem ** (moveCount-addTem)
-            if temperature <= 50: # t=1.05 -> step=80
+            if temperature <= 30: # t=1.05 -> step=70
                 probs = probs ** temperature
                 probs = probs / np.sum(probs)
             else:
@@ -156,24 +156,10 @@ class AlphaDog(_Player.PLAYER):
         pos = self.selectAction(actionProbs, moveCount=len(board.moves))
         return pos // self.Size, pos % self.Size
     
-    def playMode(self) -> 'AlphaDog':
-        self.Net.eval()
-        self.noise = False
-        return self
-    
-    def ACT(self, board:GomokuBoard, useMCTS:bool=True) -> tuple:
-        ### Pygame 接口
-        if useMCTS: # use MCTS search
-            return self.TakeAction(board)
-        else: # no search, only P-V net
-            policy, _ = self.evalState(board.getStateAsT().to(self.dv))
-            policy = torch.exp(policy.squeeze())
-            pos = torch.multinomial(policy, 1).item()
-            return pos // self.Size, pos % self.Size
-    
     def _SelfPlay(self) -> list[tuple]:
         """Create self-play data
-        :return: [(state, mctsProb, result), ...]
+        Returns:
+            [(state, mctsProb, result), ...]
         """
         board = GomokuBoard()
         board.dv = self.dv
@@ -188,7 +174,7 @@ class AlphaDog(_Player.PLAYER):
                 if board.placeStone(pos // self.Size, pos % self.Size):
                     states.append(boardState)
                     mctsProbs.append(torch.from_numpy(actionProbs).float())
-        result = 1 if board.Winner == 1 else -1 if board.Winner==2 else 0
+        result = 1 if board.Winner==1 else -1 if board.Winner==2 else 0
         # Return Data
         data = []
         for state, mctsProb in zip(states, mctsProbs): # old first
@@ -201,8 +187,9 @@ class AlphaDog(_Player.PLAYER):
 
     def CreateData(self, numGames:int, numPara:int=4):
         """Create self-play data (support cuda multi-processing)
-        :param numGames (int): num of self-play data to be created
-        :param numPara (int): num of parallel workers (if > 0)
+        Args:
+            numGames: num of self-play data to be created
+            numPara: num of parallel workers (if > 0)
         """
         if numPara: ### Parallel Self-Play on CUDA
             if not torch.cuda.is_available(): raise RuntimeError("No CUDA available")
@@ -219,33 +206,40 @@ class AlphaDog(_Player.PLAYER):
                 self.Memory.push(state, mctsProb, result)
         del allData
         if torch.cuda.is_available(): torch.cuda.empty_cache()
-
-    def TRAIN(self, lr=1e-3, batch_size=256):
+    
+    def SaveModel(self, path:str):
+        """Save trained model (only weights)"""
+        torch.save(self.Net.state_dict(), path)
+        print("Model Saved")
+    
+    def TRAIN(self, lr=2e-4, batch_size=256):
         """Train the model
-        :param lr (float): init learning rate
-        :param batch_size (int): batch size for training
+        Args:
+            lr: init learning rate
+            batch_size: batch size for training
         """
-        num_epochs = 30
+        num_epochs = 32
         self.Net.train()
         print(f"Learning Rate: {lr},  Batch Size: {batch_size}")
-        optimizer = torch.optim.AdamW(self.Net.parameters(), lr=lr, weight_decay=1e-4)
+        optimizer = torch.optim.AdamW(self.Net.parameters(), lr=lr, weight_decay=1e-3)
         #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
         
         for epoch in range(1, num_epochs+1):
+            print(f"Epoch: {epoch}")
+            if torch.cuda.is_available(): torch.cuda.empty_cache()
             t_start = time.time()
             
-            ### Self-Play # 32 games ~ 2000 moves ~ 15 min for 8 para
-            self.Memory.clear() # clear old data
-            self.CreateData(48, numPara=4)
+            ### Self-Play
+            self.CreateData(64, numPara=4)
             if not (len(self.Memory) > batch_size): continue
-            else: print(len(self.Memory))
+            else: print(f"Buffer:{len(self.Memory)}", end=",  ")
 
             ### Sample and Step
             iters = 0 # 迭代次数
             counter = 0 # 无效迭代计数器
             bestLoss = 100
             lossSum = 0.0
-            while (counter < 10) and (iters < 200):
+            while (counter <= 7) and (iters <= 100):
                 optimizer.zero_grad()
                 states_batch, mctsProbs_batch, rewards_batch = self.Memory.sample(batch_size)
                 policy, value = self.evalState(states_batch)
@@ -265,11 +259,10 @@ class AlphaDog(_Player.PLAYER):
                 del states_batch, mctsProbs_batch, rewards_batch, policy, value
                 if torch.cuda.is_available(): torch.cuda.empty_cache()
             #scheduler.step()
-            print(f"Epoch-{epoch},  Iters:{iters},  Time:{(time.time()-t_start)/60:.1f}m")
-            print(f"Loss: {lossSum/iters:.4f} ~ {bestLoss:.4f}, {policyLoss.item():.4f} + {valueLoss.item():.4f}")
-            if epoch % 10 == 0:
-                torch.save(self.Net.state_dict(), rootPath+f"model_{epoch}.pth")
-                print("Model Saved")
+            print(f"Iters:{iters},  Time:{(time.time()-t_start)/60:.1f}m")
+            print(f"Loss: {lossSum/iters:.4f} ~ {bestLoss:.4f},  {policyLoss.item():.4f} + {valueLoss.item():.4f}")
+            if epoch % 5 == 0: self.Memory.clear() # clear old data
+            if epoch % 10 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
             print()
         
         print("Training Completed")
@@ -279,7 +272,8 @@ def _selfplayWorker(modelDict, device:torch.device):
     #torch.cuda.set_per_process_memory_fraction(0.2)
     player = AlphaDog(device=device) # new player1, same net
     player.Net.load_state_dict(modelDict)
-    player.MCTS = MCTS(player.Net, num_simulations=400, device=device)
+    player.Net.eval()
+    player.MCTS = MCTS(player.Net, num_simulations=1000, device=device)
     return player._SelfPlay()
 
 ###
@@ -290,6 +284,6 @@ if __name__ == "__main__":
     if torch.cuda.is_available(): print(torch.cuda.get_device_properties(0))
     print()
 
-    player = AlphaDog()
+    player = AlphaDog(modelPath=rootPath+"model_v0.pth")
     print(f"{player}  |  {player.dv}")
     player.TRAIN()
