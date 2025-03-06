@@ -15,7 +15,7 @@ from _BetaDog import *
 from _HumanPlayer import HumanPl
 
 pygame.init()
-pygame.display.set_caption("五子棋")
+pygame.display.set_caption("Gomoku")
 
 ### ****************************************
 class GomokuGame():
@@ -121,10 +121,10 @@ clock = pygame.time.Clock()
 font = pygame.font.SysFont('calibri', 60, True, True)
 
 ### ****************************************
-AImodel = "./trained/model_30.pth" if True else None
+AImodel = "./trained/model_v1.pth" if True else None
 
-#player1 = PLAYER(1) if True else HumanPl(1)
-player1 = AlphaDog(1, size, modelPath=AImodel).playMode()
+player1 = PLAYER(1) if False else HumanPl(1)
+#player1 = AlphaDog(1, size, modelPath=AImodel).playMode()
 #player1 = BetaDog(2, num_simulations=2000)
 
 #player2 = PLAYER(2) if True else HumanPl(2)
@@ -143,7 +143,7 @@ while Game._Running:
     ### 一局游戏
     while Game.winner is None:
         nowPl = Game.GetNowPl()
-        clock.tick(10) # FPS=10
+        clock.tick(2) # FPS=10
 
         events = pygame.event.get()
         if Game.CheckKill(events): break
@@ -152,7 +152,7 @@ while Game._Running:
         if nowPl.IsHuman():
             action = nowPl.ACT(events, step)
         else:
-            with torch.no_grad(): action = nowPl.ACT(Game.GetBoard())
+            with torch.no_grad(): action = nowPl.ACT(Game.GetBoard(), useMCTS=False)
         if action: Y, X = action
         else: continue
         ### 玩家落子成功
