@@ -97,11 +97,10 @@ class GomokuBoard:
         return np.all(self.Board != 0)
 
     def getState(self) -> np.ndarray:
-        """Get current state [5,sz,sz]
+        """Get current state [4,sz,sz]
         2 Layers: Player & Opponent
         1 Layer: Legal Position
-        1 Layers: History Move
-        1 Layer: Player's Color
+        1 Layer: History Move
         """
         player = self.PlayerNow # 1=Black, 2=White
         opponent = 1 if player == 2 else 2
@@ -109,14 +108,14 @@ class GomokuBoard:
         playerPos = self.Board == player
         opponentPos = self.Board == opponent
         legalPos = self.Board == 0 # legal position
-        c = 1 if player == 1 else 0
-        color = np.full_like(playerPos, c)
+        #c = 1 if player == 1 else 0
+        #color = np.full_like(playerPos, c)
         
-        state = np.stack([playerPos, opponentPos, legalPos, color, *self.History], axis=0).astype(np.int8)
+        state = np.stack([playerPos, opponentPos, legalPos, *self.History], axis=0).astype(np.int8)
         return state
     
     def getStateAsT(self) -> torch.Tensor:
-        """Get current state as Tensor [1,5,sz,sz]"""
+        """Get current state as Tensor [1,4,sz,sz]"""
         return torch.from_numpy(self.getState()).float().unsqueeze(0).to(self.dv)
 
     def __str__(self):
