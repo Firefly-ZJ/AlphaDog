@@ -1,0 +1,59 @@
+### .gitignore File
+### Updated 2025/08
+
+# ----- Python Files -----
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# ----- Environment -----
+.env/
+.venv/
+venv/
+env/
+ENV/
+
+# ----- IDE Configs -----
+# VS Code
+.vscode/
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# ----- OS & cmd -----
+*.gitattributes
+*.exe
+*.bat
+*.sh
+# macOS
+.DS_Store
+._*
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+# Linux
+*~
+
+# ----- Logs -----
+*.log
+*.out
+*.txt
+*.csv
+*.json
+
+### Specific ###
+ref/
+web/
+
+# ----- Other Files -----
+_GomokuBoard_c.py
+
+# ----- Old & test -----
+Ver0/
+Ver1/
+
+### Not Ignore ###

@@ -40,22 +40,23 @@ class InvalidNode(Node):
 
 #####     MCTS     #####
 class MCTS():
-    def __init__(self, model, num_simulations:int=200, device=None):
+    def __init__(self, model, num_simulations:int=200, device="cpu"):
         """Monte-Carlo Tree Search
         Args:
             model: Policy-Value Network
             num_simulations: simulations per search
+            device (str, torch.device): computation device
         """
+        self.dv = device if isinstance(device, torch.device) else torch.device(device)
         self.Model = model # Policy-Value Network
         self.Root = Node() # Root Node
         self.INVALID = InvalidNode() # Preset Invalid Node
-        self.dv = device if device is not None else torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.Simulations = num_simulations # Simulations per Search
         ### Hyper-parameters
         self.gamma = 0.99 # Discount Factor for Future Rewards
         self.c_puct = 5 # PUCT Exploration param: U(s,a) = c_puct * P(s,a) * sqrt(sum(N(s))) / (1+N(s,a))
     
-    def setHyper(self, **kwargs):
+    def _setHyper(self, **kwargs):
         """:param kwargs: Hypers (simu, c_puct, noise, eps, tem)"""
         if "simu" in kwargs: self.Simulations = kwargs["simu"]
         if "c_puct" in kwargs: self.c_puct = kwargs["c_puct"]
@@ -67,7 +68,7 @@ class MCTS():
     
     def evalState(self, state:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """State -> Policy, Value"""
-        return self.Model.forward(state)
+        return self.Model(state)
     
     def search(self, board) -> np.ndarray:
         """Search for action probs by MCTS
@@ -81,7 +82,7 @@ class MCTS():
             pos = move[0] * board.getSize() + move[1]
             if not start.haveChildren(): self.expand(start, pos, board)
             start = start.children[pos]
-            if not start.isValid: raise ValueError("Invalid Move Recorded")
+            if not start.isValid: raise RuntimeWarning("Invalid move recorded!")
         
         for _ in range(self.Simulations):
             self.simulate(start, board)
@@ -108,7 +109,7 @@ class MCTS():
             policy, value = self.evalState(board_.getStateAsT().to(self.dv))
             policy = torch.exp(policy.squeeze()) # logSoftmax -> Prob
             self.expand(node, policy, board_)
-            self.backup(-value.item(), searchPath) # -Value
+            self.backup(-value.item(), searchPath) ### -Value
 
     def selectChild(self, node:Node) -> tuple[int, Node]:
         """Select a child node (PUCT Alg)"""
@@ -120,12 +121,13 @@ class MCTS():
             upper = self.c_puct * child.priorProb * np.sqrt(node.visitCount) / (1 + child.visitCount)
             score = child.getValue() + upper
             if score > bestScore: bestScore, bestAction, bestChild = score, pos, child
+        if not bestChild.isValid: raise RuntimeWarning("No valid child found in selection!")
         return bestAction, bestChild
 
     def expand(self, node:Node, policy:torch.Tensor|int, board):
         """Expand the node (add child nodes)"""
         size = board.getSize()
-        if type(policy) != torch.Tensor: # Assigned Policy
+        if not isinstance(policy, torch.Tensor): # Asigned move
             ### 注：实际为np.int64
             for pos in range(size*size):
                 if pos == policy: node.children[pos] = Node(priorProb=1.0)
@@ -142,18 +144,20 @@ class MCTS():
         """Update the value of nodes backward"""
         while searchPath:
             node:Node = searchPath.pop()
-            node.visitCount += 1  # 更新访问次数
-            node.valueSum += value  # 更新累计价值
-            value = -value * self.gamma  # 计算对父节点的价值
+            node.visitCount += 1  # Update visit count
+            node.valueSum += value  # Update value sum
+            value = -value * self.gamma  # Value for parent node
 
 if __name__ == "__main__":
-    from _AlphaDog import *
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    from _GomokuNet import GomokuNet
+    from _GomokuBoard import GomokuBoard
     node = Node()
-    mcts = MCTS(GomokuNet().to(device), 400, device=device)
+    mcts = MCTS(GomokuNet(), 100)
     board = GomokuBoard()
-    print(mcts.search(board))
+    
+    print("Ready")
+    print(np.argmax(mcts.search(board)))
     board.placeStone(0, 0)
-    print(mcts.search(board))
+    print(np.argmax(mcts.search(board)))
     board.placeStone(0, 2)
     print(mcts.search(board))

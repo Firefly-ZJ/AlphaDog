@@ -1,5 +1,4 @@
-#####     五子棋 可视化     #####
-#####     Gomoku Visualization     #####
+#####     可视化  Visualization     #####
 # 黑方先手, 1=黑, 2=白, 0=空
 # 棋盘大小: 16*16
 
@@ -8,26 +7,33 @@ import numpy as np
 import torch
 
 from _GomokuBoard import GomokuBoard
-from _Player import *
-#from _AIPlayer import *
-from _AlphaDog import *
-from _BetaDog import *
+from _Player import PLAYER
 from _HumanPlayer import HumanPl
+from AlphaDog import AlphaDog
+from BetaDog import BetaDog
 
+### ----- Initialization and Constants ----- ###
 pygame.init()
 pygame.display.set_caption("Gomoku")
 
+size = 16 ### Board size
+step = 800 / (size+1)
+clock = pygame.time.Clock()
+font = pygame.font.SysFont('calibri', 60, True, True)
+
+device = torch.device("cuda" if torch.cuda.is_available() else
+                      "xpu" if torch.xpu.is_available() else "cpu")
+
 ### ****************************************
 class GomokuGame():
-    # Black First. 1=Black, 2=White
-    def __init__(self, pl1:PLAYER, pl2:PLAYER, size:int=16):
+    """Black First. 1=Black, 2=White"""
+    def __init__(self, pl1:PLAYER, pl2:PLAYER):
         self._Running:bool = True # Whether is running
-        self.size:int = size
         self._Board = GomokuBoard(size) # Gomoku Board
         self.screen = pygame.display.set_mode((1200,800))
         self.player1, self.player2 = pl1, pl2
-        print(pl1)
-        print(pl2)
+        print("Player 1: ", pl1)
+        print("Player 2: ", pl2)
         self.START() # Start a new game
     
     def START(self):
@@ -67,10 +73,10 @@ class GomokuGame():
         pygame.draw.rect(self.screen, (205,190,112), pygame.Rect(800,0,400,800))
 
         color, lw = (0,0,0), 3
-        for i in range(0, self.size):
+        for i in range(0, size):
             x_pos = step*(i+1)
             pygame.draw.line(self.screen, color, (x_pos,step), (x_pos,800-step), lw)
-        for j in range(0, self.size):
+        for j in range(0, size):
             y_pos = step*(j+1)
             pygame.draw.line(self.screen, color, (step,y_pos), (800-step,y_pos), lw)
     
@@ -114,29 +120,25 @@ class GomokuGame():
         """获取本局双方行动序列"""
         return self.moves
     
-### ****************************************
-size = 16
-step = 800 / (size+1)
-clock = pygame.time.Clock()
-font = pygame.font.SysFont('calibri', 60, True, True)
+### ----- Player Initialization ----- ###
+AImodel = "./trained/model_v0.1.pth" if True else None
 
-### ****************************************
-AImodel = "./trained/model_v1.pth" if True else None
-
-player1 = PLAYER(1) if False else HumanPl(1)
-#player1 = AlphaDog(1, size, modelPath=AImodel).playMode()
-#player1 = BetaDog(2, num_simulations=2000)
+#player1 = PLAYER(1) if False else HumanPl(1)
+player1 = AlphaDog(1, size, device, load_path=AImodel, num_simulations=100).playMode()
+#player1 = BetaDog(1, num_simulations=2000)
 
 #player2 = PLAYER(2) if True else HumanPl(2)
-player2 = AlphaDog(2, size, modelPath=AImodel).playMode()
+player2 = AlphaDog(2, size, device, load_path=AImodel, num_simulations=100).playMode()
 #player2 = BetaDog(2, num_simulations=2000)
 
-#####     Main Loop     #####
-Game = GomokuGame(player1, player2, size)
+### ----- Main Loop ----- ###
+print("Game Start")
+Game = GomokuGame(player1, player2)
 while Game._Running:
     if Game.winner != None:
         clock.tick(0.2) # 5s自动下一局
         Game.START()
+    print()
     pygame.display.flip()
     if Game.CheckKill(pygame.event.get()): break
 
@@ -152,7 +154,8 @@ while Game._Running:
         if nowPl.IsHuman():
             action = nowPl.ACT(events, step)
         else:
-            with torch.no_grad(): action = nowPl.ACT(Game.GetBoard(), useMCTS=False)
+            with torch.no_grad():
+                action = nowPl.ACT(Game.GetBoard())
         if action: Y, X = action
         else: continue
         ### 玩家落子成功
@@ -176,7 +179,5 @@ while Game._Running:
         else: continue
 
         pygame.display.flip()
-    
-    print()
 
 print("Over")

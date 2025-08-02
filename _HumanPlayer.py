@@ -1,5 +1,4 @@
 #####     Player     #####
-#####     Human Player     #####
 import pygame
 from _Player import PLAYER
 

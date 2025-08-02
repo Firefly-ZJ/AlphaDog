@@ -11,11 +11,11 @@ class GomokuBoard:
         self.Board:np.ndarray = np.zeros((size, size), dtype=np.int8)
         self.PlayerNow = 1 # 1=Black, 2=White
         self.GameEnd, self.Winner = False, None
-        self.dv = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.moves:list = [] # Player's moves
         # History Steps Memory (5 steps) # new at right
         self.histSteps = 1
-        self.History = deque([np.zeros((size, size), dtype=np.int8) for i in range(self.histSteps)], maxlen=self.histSteps)
+        self.History = deque([np.zeros((size, size), dtype=np.int8) for i in range(self.histSteps)],
+                             maxlen=self.histSteps)
     
     def reset(self):
         """Start a new game"""
@@ -31,7 +31,7 @@ class GomokuBoard:
         return deepcopy(self)
     
     def __getitem__(self, pos) -> int:
-        ### 0=Empty, 1=Black, 2=White, -1=Invalid
+        """0=Empty, 1=Black, 2=White, -1=Invalid"""
         y, x = pos
         if 0<=x<self.Size and 0<=y<self.Size:
             return self.Board[y,x]
@@ -98,9 +98,10 @@ class GomokuBoard:
 
     def getState(self) -> np.ndarray:
         """Get current state [4,sz,sz]
-        2 Layers: Player & Opponent
-        1 Layer: Legal Position
-        1 Layer: History Move
+
+        - 2 Layers: Player & Opponent
+        - 1 Layer: Legal Position
+        - 1 Layer: History Move
         """
         player = self.PlayerNow # 1=Black, 2=White
         opponent = 1 if player == 2 else 2
@@ -116,7 +117,7 @@ class GomokuBoard:
     
     def getStateAsT(self) -> torch.Tensor:
         """Get current state as Tensor [1,4,sz,sz]"""
-        return torch.from_numpy(self.getState()).float().unsqueeze(0).to(self.dv)
+        return torch.from_numpy(self.getState()).float().unsqueeze(0)
 
     def __str__(self):
         return "\n".join([" ".join(["X" if i==1 else "O" if i==2 else "." for i in row]) for row in self.Board])
@@ -125,9 +126,10 @@ if __name__ == "__main__":
     board = GomokuBoard()
     board.reset()
     print(board)
-    print(board.getStateAsT())
+    print(board.getStateAsT().shape)
+    print()
+
     board.placeStone(1,1)
+    board.placeStone(1,2)
     print(board)
     print(board.getStateAsT())
-    print(board.getStateAsT().shape)
-    
