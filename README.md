@@ -4,7 +4,7 @@
 ## Note
 **Its performace is not so satisfying yet.**
 
-## Overview 简介 (Ver 0.1, 2025/07)
+## Overview 简介 (Ver 0.1 - 2025/07)
 
 AlphaDog is a Gomoku (Five in a Row) AI inspired by the AlphaGo series. It uses a combination of deep neural networks and Monte Carlo Tree Search (MCTS) to play Gomoku, and is trained through Reinforcement Learning and self-play data.
 
@@ -40,7 +40,9 @@ Data buffer is cleared every 5 epoches.
 - *Torchinfo (not necessary)*
 
 ## Updates
-None
+#### Version 0 (2025/02):
+- **Ver 0.1 - 2025/07**: Code optimization, no change in model.
+- **2025/08**: Convert to half precision to accelerate.
 
 ## License
 
