@@ -13,6 +13,7 @@ from AlphaDog import AlphaDog
 from BetaDog import BetaDog
 
 ### ----- Initialization and Constants ----- ###
+FPS = 10 # Frames per second
 pygame.init()
 pygame.display.set_caption("Gomoku")
 
@@ -23,6 +24,17 @@ font = pygame.font.SysFont('calibri', 60, True, True)
 
 device = torch.device("cuda" if torch.cuda.is_available() else
                       "xpu" if torch.xpu.is_available() else "cpu")
+
+### ----- Player Initialization ----- ###
+AImodel = "./trained/model_v0.1.pth" if True else None
+
+player1 = PLAYER(1) if True else HumanPl(1)
+#player1 = AlphaDog(1, size, device, load_path=AImodel, num_simulations=100).playMode()
+#player1 = BetaDog(1, num_simulations=2000)
+
+#player2 = PLAYER(2) if False else HumanPl(2)
+player2 = AlphaDog(2, size, device, load_path=AImodel, num_simulations=100).playMode()
+#player2 = BetaDog(2, num_simulations=2000)
 
 ### ****************************************
 class GomokuGame():
@@ -41,7 +53,7 @@ class GomokuGame():
         self._Board.reset()
         self._NowPlayer = 1
         self.winner = None
-        self.moves = []
+        self.moves = [] # Moves history: [(y,x,side), ...]
         self.player1.StartNew()
         self.player2.StartNew()
 
@@ -100,9 +112,9 @@ class GomokuGame():
 
     def PlaceStone(self, y, x, side:int) -> bool:
         """放入一颗棋子：黑1，白2"""
-        if self._Board.placeStone(y,x):
-            self.moves.append((y,x,side))
-            self.DrawStone(y,x,side)
+        if self._Board.placeStone(y, x):
+            self.moves.append((y, x, side))
+            self.DrawStone(y, x, side)
             return True
         else: return False
     
@@ -116,21 +128,6 @@ class GomokuGame():
         """获取当前board情况（返回副本）"""
         return self._Board.copy()
     
-    def GetMoves(self) -> list:
-        """获取本局双方行动序列"""
-        return self.moves
-    
-### ----- Player Initialization ----- ###
-AImodel = "./trained/model_v0.1.pth" if True else None
-
-#player1 = PLAYER(1) if False else HumanPl(1)
-player1 = AlphaDog(1, size, device, load_path=AImodel, num_simulations=100).playMode()
-#player1 = BetaDog(1, num_simulations=2000)
-
-#player2 = PLAYER(2) if True else HumanPl(2)
-player2 = AlphaDog(2, size, device, load_path=AImodel, num_simulations=100).playMode()
-#player2 = BetaDog(2, num_simulations=2000)
-
 ### ----- Main Loop ----- ###
 print("Game Start")
 Game = GomokuGame(player1, player2)
@@ -145,7 +142,7 @@ while Game._Running:
     ### 一局游戏
     while Game.winner is None:
         nowPl = Game.GetNowPl()
-        clock.tick(2) # FPS=10
+        clock.tick(FPS)
 
         events = pygame.event.get()
         if Game.CheckKill(events): break
@@ -158,6 +155,7 @@ while Game._Running:
                 action = nowPl.ACT(Game.GetBoard())
         if action: Y, X = action
         else: continue
+
         ### 玩家落子成功
         if Game.PlaceStone(Y, X, Game._NowPlayer):
             if Game._Board.isWin(Y, X): ### 一方胜利，一局结束

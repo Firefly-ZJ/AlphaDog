@@ -83,7 +83,7 @@ class AlphaDogPara(AlphaDog):
         #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
         
         for epoch in range(1, num_epochs+1):
-            print(f"Epoch:{epoch}/{num_epochs}")
+            print(f"Epoch: {epoch}/{num_epochs}")
             optimizer.zero_grad()
             t_start = time.time()
             

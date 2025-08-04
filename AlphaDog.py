@@ -14,17 +14,26 @@ from _MCTS import *
 from _Dataset import Dataset
 
 class AlphaDog(PLAYER):
-    """Gomoku AI Player: AlphaDog"""
-    def __init__(self, side=1, size=16, device="cpu", load_path=None, num_simulations=400):
+    def __init__(self, side=1, size=16, device="cpu", load_path=None,
+                 num_simulations=400, dataset_capacity=20000):
+        """Gomoku AI Player: AlphaDog
+        Args:
+            side (int): player side (1 or 2)
+            size (int): board size (default: 16)
+            device (str, torch.device): device to use (default: "cpu")
+            load_path (str): path to load pre-trained model weights
+            num_simulations (int): number of MCTS simulations per move
+            dataset_capacity (int): max size of the replay memory
+        """
         super().__init__(side, name="AlphaDog", mode="AI")
         self.Size = size # board size
         self.dv = device if isinstance(device, torch.device) else torch.device(device)
         self.useMCTS = True ### Only active in Pygame playing!
         ### Net and MCTS
-        self.Net = GomokuNet(size).to(self.dv)
+        self.Net = GomokuNet(size, half=True).to(self.dv)
         if load_path: self.Net.load_state_dict(torch.load(load_path, map_location="cpu", weights_only=True))
         self.MCTS = MCTS(self.Net, num_simulations, device=self.dv)
-        self.Memory = Dataset(self.dv, capacity=20000)
+        self.Memory = Dataset(self.dv, capacity=dataset_capacity)
         ### Hyper-parameters
         self.tem = 1.01 # Temperature param (1/tau): visitCounts = visitCounts ** self.tem
         self.noise = True # Add Dirichlet Noise
@@ -32,11 +41,6 @@ class AlphaDog(PLAYER):
     
     def StartNew(self):
         self.MCTS.reset()
-        
-    def evalState(self, state:torch.Tensor):
-        """State -> Policy, Value"""
-        policy, value = self.Net.forward(state)
-        return policy, value
     
     def selectAction(self, probs:np.ndarray, moveCount:int=0) -> int:
         """Select an action based on probability (with Tau and Dir-noise)"""
@@ -76,7 +80,8 @@ class AlphaDog(PLAYER):
         if self.useMCTS: # use MCTS search
             return self.TakeAction(board)
         else: # no search, only P-V net
-            policy, _ = self.evalState(board.getStateAsT().to(self.dv))
+            state = torch.from_numpy(board.getState()).half().unsqueeze(0).to(self.dv)
+            policy, value = self.Net(state)
             policy = torch.exp(policy.squeeze())
             pos = torch.multinomial(policy, 1).item()
             return pos // self.Size, pos % self.Size
@@ -88,23 +93,23 @@ class AlphaDog(PLAYER):
         states, mctsProbs = [], []
         # Self-Play A Game
         while not board.GameEnd:
-            boardState = board.getStateAsT().to(self.dv)
+            boardState = torch.from_numpy(board.getState()).half().unsqueeze(0).to(self.dv)
             actionProbs = self.MCTS.search(board) # [sz*sz]
             pos = self.selectAction(actionProbs, moveCount=len(board.moves))
             if board.placeStone(pos // self.Size, pos % self.Size):
                 states.append(boardState)
-                mctsProbs.append(torch.from_numpy(actionProbs).float().to(self.dv))
+                mctsProbs.append(torch.from_numpy(actionProbs).half().to(self.dv))
         result = 1 if board.Winner == 1 else -1 if board.Winner==2 else 0
         # Update Replay Memory (one for each move)
         for state, mctsProb in zip(states, mctsProbs): # old first
             self.Memory.push(state, mctsProb, result)
             result = -result
     
-    def CreateData(self, numGames:int):
+    def CreateData(self, num_games:int):
         """Create self-play data"""
         self.Net.eval()
         with torch.no_grad():
-            for _ in range(numGames): self._SelfPlay()
+            for i in range(num_games): self._SelfPlay()
 
     def SaveModel(self, path:str):
         """Save trained model (only weights)"""
@@ -120,12 +125,12 @@ class AlphaDog(PLAYER):
             batch_size (int): mini-batch size
         """
         print("Training...")
-        print(f"Epochs: {num_epochs}, Learning Rate: {lr},  Batch Size: {batch_size}\n")
+        print(f"Epochs: {num_epochs}, Learning Rate: {lr},  Batch Size: {batch_size}")
         optimizer = torch.optim.AdamW(self.Net.parameters(), lr=lr, weight_decay=1e-3)
         #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
         
         for epoch in range(1, num_epochs+1):
-            print(f"Epoch:{epoch}/{num_epochs}")
+            print(f"\nEpoch: {epoch} / {num_epochs}")
             optimizer.zero_grad()
             t_start = time.time()
 
@@ -161,12 +166,11 @@ class AlphaDog(PLAYER):
                 optimizer.zero_grad()
             #scheduler.step()
             print(f"Iters: {iters},  Time: {(time.time()-t_start)/60:.1f} min")
-            print(f"Loss={lossSum/iters:.4f} ~ {bestLoss:.4f},  {policyLoss.item():.4f} + {valueLoss.item():.4f}")
+            print(f"Loss = {lossSum/iters:.4f} ~ {bestLoss:.4f}  ({policyLoss.item():.4f} + {valueLoss.item():.4f})")
             if epoch % 5 == 0: self.Memory.clear() # clear old data
-            if epoch % 10 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
-            print()
+            if epoch % 2 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
         
-        print("Training Completed")
+        print("\nTraining Completed")
 
 if __name__ == "__main__":
     rootPath = "./"
@@ -174,5 +178,5 @@ if __name__ == "__main__":
                           "xpu" if torch.xpu.is_available() else "cpu")
     print(f"Device: {device}")
 
-    player = AlphaDog(device=device)
-    player.TRAIN(num_epochs=40, num_games=20)
+    player = AlphaDog(device=device, num_simulations=100)
+    player.TRAIN(num_epochs=20, num_games=4, lr=5e-4, batch_size=64)

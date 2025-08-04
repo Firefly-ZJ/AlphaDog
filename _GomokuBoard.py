@@ -6,16 +6,15 @@ from collections import deque
 
 class GomokuBoard:
     """Gomoku Board: 0=Empty, 1=Black, 2=White"""
-    def __init__(self, size:int=16):
+    def __init__(self, size:int=16, history_steps:int=1):
         self.Size:int = size
         self.Board:np.ndarray = np.zeros((size, size), dtype=np.int8)
         self.PlayerNow = 1 # 1=Black, 2=White
         self.GameEnd, self.Winner = False, None
         self.moves:list = [] # Player's moves
         # History Steps Memory (5 steps) # new at right
-        self.histSteps = 1
-        self.History = deque([np.zeros((size, size), dtype=np.int8) for i in range(self.histSteps)],
-                             maxlen=self.histSteps)
+        self.histSteps = history_steps
+        self.History = deque(np.zeros((self.histSteps, size, size), dtype=np.bool), maxlen=self.histSteps)
     
     def reset(self):
         """Start a new game"""
@@ -24,7 +23,7 @@ class GomokuBoard:
         self.GameEnd, self.Winner = False, None
         self.moves = []
         for _ in range(self.histSteps):
-            self.History.append(np.zeros((self.Size, self.Size), dtype=np.int8))
+            self.History.append(np.zeros((self.Size, self.Size), dtype=np.bool))
     
     def copy(self) -> "GomokuBoard":
         """Deepcopy current GomokuBoard"""
@@ -68,7 +67,7 @@ class GomokuBoard:
 
     def addHistory(self, row, col):
         """Add the move to history memory (3 steps)"""
-        position = np.zeros((self.Size, self.Size), dtype=np.int8)
+        position = np.zeros((self.Size, self.Size), dtype=np.bool)
         position[row, col] = 1
         self.History.append(position) # new at left
         self.moves.append((row, col, self.PlayerNow))
@@ -97,7 +96,7 @@ class GomokuBoard:
         return np.all(self.Board != 0)
 
     def getState(self) -> np.ndarray:
-        """Get current state [4,sz,sz]
+        """Get current state [4, sz, sz] (dtype=np.bool)
 
         - 2 Layers: Player & Opponent
         - 1 Layer: Legal Position
@@ -112,12 +111,8 @@ class GomokuBoard:
         #c = 1 if player == 1 else 0
         #color = np.full_like(playerPos, c)
         
-        state = np.stack([playerPos, opponentPos, legalPos, *self.History], axis=0).astype(np.int8)
+        state = np.stack([playerPos, opponentPos, legalPos, *self.History], axis=0, dtype=np.bool)
         return state
-    
-    def getStateAsT(self) -> torch.Tensor:
-        """Get current state as Tensor [1,4,sz,sz]"""
-        return torch.from_numpy(self.getState()).float().unsqueeze(0)
 
     def __str__(self):
         return "\n".join([" ".join(["X" if i==1 else "O" if i==2 else "." for i in row]) for row in self.Board])
@@ -126,10 +121,10 @@ if __name__ == "__main__":
     board = GomokuBoard()
     board.reset()
     print(board)
-    print(board.getStateAsT().shape)
+    print(board.getState().shape)
     print()
 
     board.placeStone(1,1)
     board.placeStone(1,2)
     print(board)
-    print(board.getStateAsT())
+    print(board.getState())

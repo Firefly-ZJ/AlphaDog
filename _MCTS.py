@@ -1,6 +1,7 @@
 #####     Monte-Carlo Tree Search     #####
 import numpy as np
 import torch
+from _GomokuBoard import GomokuBoard
 
 #####     Node     #####
 class Node():
@@ -40,11 +41,11 @@ class InvalidNode(Node):
 
 #####     MCTS     #####
 class MCTS():
-    def __init__(self, model, num_simulations:int=200, device="cpu"):
+    def __init__(self, model:torch.nn.Module, num_simulations:int=200, device="cpu"):
         """Monte-Carlo Tree Search
         Args:
-            model: Policy-Value Network
-            num_simulations: simulations per search
+            model (Module): Policy-Value Network
+            num_simulations (int): simulations per search
             device (str, torch.device): computation device
         """
         self.dv = device if isinstance(device, torch.device) else torch.device(device)
@@ -66,14 +67,10 @@ class MCTS():
         """Reset Root, and start a new game"""
         self.Root = Node()
     
-    def evalState(self, state:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """State -> Policy, Value"""
-        return self.Model(state)
-    
-    def search(self, board) -> np.ndarray:
+    def search(self, board:GomokuBoard) -> np.ndarray:
         """Search for action probs by MCTS
         Args:
-            board: 当前棋盘
+            board (GomokuBoard): 当前棋盘
         Returns:
             动作概率分布（根据子节点的访问次数计算）
         """
@@ -82,17 +79,16 @@ class MCTS():
             pos = move[0] * board.getSize() + move[1]
             if not start.haveChildren(): self.expand(start, pos, board)
             start = start.children[pos]
-            if not start.isValid: raise RuntimeWarning("Invalid move recorded!")
+            if not start.isValid: raise RuntimeError("Invalid move recorded!")
         
         for _ in range(self.Simulations):
             self.simulate(start, board)
-        
         return start.getActionProbs()
     
-    def simulate(self, start:Node, board):
-        """A simulation process"""
+    def simulate(self, start:Node, board:GomokuBoard):
+        """A simulation process (board copied)"""
         node = start
-        board_ = board.copy()
+        board_ = board.copy() ###
         searchPath = [start]
         # Select till leaf
         while node.haveChildren():
@@ -106,7 +102,8 @@ class MCTS():
         if node.isWin:
             self.backup(1, searchPath)
         else:
-            policy, value = self.evalState(board_.getStateAsT().to(self.dv))
+            state = torch.from_numpy(board_.getState()).half().unsqueeze(0).to(self.dv)
+            policy, value = self.Model(state)
             policy = torch.exp(policy.squeeze()) # logSoftmax -> Prob
             self.expand(node, policy, board_)
             self.backup(-value.item(), searchPath) ### -Value
@@ -121,10 +118,10 @@ class MCTS():
             upper = self.c_puct * child.priorProb * np.sqrt(node.visitCount) / (1 + child.visitCount)
             score = child.getValue() + upper
             if score > bestScore: bestScore, bestAction, bestChild = score, pos, child
-        if not bestChild.isValid: raise RuntimeWarning("No valid child found in selection!")
+        if not bestChild.isValid: raise RuntimeError("No valid child found in selection!")
         return bestAction, bestChild
 
-    def expand(self, node:Node, policy:torch.Tensor|int, board):
+    def expand(self, node:Node, policy:torch.Tensor|int, board:GomokuBoard):
         """Expand the node (add child nodes)"""
         size = board.getSize()
         if not isinstance(policy, torch.Tensor): # Asigned move
@@ -150,14 +147,17 @@ class MCTS():
 
 if __name__ == "__main__":
     from _GomokuNet import GomokuNet
-    from _GomokuBoard import GomokuBoard
     node = Node()
     mcts = MCTS(GomokuNet(), 100)
     board = GomokuBoard()
     
-    print("Ready")
-    print(np.argmax(mcts.search(board)))
+    prob = mcts.search(board)
+    print(np.argmax(prob), end=",  ")
+
     board.placeStone(0, 0)
-    print(np.argmax(mcts.search(board)))
+    prob = mcts.search(board)
+    print(np.argmax(prob), end=",  ")
+
     board.placeStone(0, 2)
-    print(mcts.search(board))
+    prob = mcts.search(board)
+    print(np.argmax(prob), "\n", prob)

@@ -8,7 +8,6 @@ import torch
 class Dataset():
     """Data buffer for training"""
     def __init__(self, device="cpu", capacity:int=100000):
-        """Data buffer for training"""
         self.buffer = deque(maxlen=capacity)
         self.capacity = capacity
         self.dv = device if isinstance(device, torch.device) else torch.device(device)

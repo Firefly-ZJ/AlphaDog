@@ -20,7 +20,8 @@ class PLAYER():
         Returns:
             action (tuple): (y,x)
         """
-        y, x = random.choice(np.argwhere(board.getBoard()==0))
+        legal = np.argwhere(board.getBoard()==0)
+        y, x = random.choice(legal)
         return y, x
     
     def AddWin(self) -> int:

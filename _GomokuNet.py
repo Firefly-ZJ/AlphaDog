@@ -19,7 +19,7 @@ class ResBlock(nn.Module):
         return h + x
 
 class GomokuNet(nn.Module):
-    def __init__(self, size=16):
+    def __init__(self, size=16, half=True):
         """Gomoku neural network: State -> Policy, Value"""
         super().__init__()
         self.size = size
@@ -38,6 +38,8 @@ class GomokuNet(nn.Module):
                                    nn.BatchNorm2d(1), nn.ReLU())
         self.fcV = nn.Sequential(nn.Linear(size*size, 128), nn.ReLU(),
                                  nn.Linear(128, 1))
+        
+        if half: self.half() ### To half precision
 
     def forward(self, x): # [B, 4, sz, sz]
         x = self.convIn(x) # [B, 96, sz, sz]
