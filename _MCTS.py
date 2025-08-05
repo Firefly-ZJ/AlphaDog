@@ -41,7 +41,7 @@ class InvalidNode(Node):
 
 #####     MCTS     #####
 class MCTS():
-    def __init__(self, model:torch.nn.Module, num_simulations:int=200, device="cpu"):
+    def __init__(self, model:torch.nn.Module, num_simulations:int=400, device="cpu"):
         """Monte-Carlo Tree Search
         Args:
             model (Module): Policy-Value Network
@@ -72,7 +72,7 @@ class MCTS():
         Args:
             board (GomokuBoard): 当前棋盘
         Returns:
-            动作概率分布（根据子节点的访问次数计算）
+            action_prob: 动作概率分布（根据子节点的访问次数计算）
         """
         start:Node = self.Root # 起始节点
         for move in board.moves:
@@ -102,7 +102,7 @@ class MCTS():
         if node.isWin:
             self.backup(1, searchPath)
         else:
-            state = torch.from_numpy(board_.getState()).half().unsqueeze(0).to(self.dv)
+            state = torch.from_numpy(board_.getState()).float().unsqueeze(0).to(self.dv)
             policy, value = self.Model(state)
             policy = torch.exp(policy.squeeze()) # logSoftmax -> Prob
             self.expand(node, policy, board_)

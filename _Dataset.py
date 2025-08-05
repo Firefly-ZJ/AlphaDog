@@ -7,7 +7,7 @@ import torch
 #####     Dataset     #####
 class Dataset():
     """Data buffer for training"""
-    def __init__(self, device="cpu", capacity:int=100000):
+    def __init__(self, device="cpu", capacity:int=10000):
         self.buffer = deque(maxlen=capacity)
         self.capacity = capacity
         self.dv = device if isinstance(device, torch.device) else torch.device(device)
@@ -24,23 +24,24 @@ class Dataset():
         size = state.shape[-1]
         state = state.squeeze(0) # [1, C, sz, sz] -> [C, sz, sz]
         mcts_prob = mcts_prob.reshape(size, size) # [sz*sz] -> [sz, sz] -> [sz*sz]
-        for k in range(4): # Rotation * 4
+        for k in range(2): # Rotation * 2
             S_ = torch.rot90(state, k, dims=(-2,-1))
             P_ = torch.rot90(mcts_prob, k, dims=(-2,-1)).reshape(-1)
             self.buffer.append((S_, P_, result))
         state, mcts_prob = torch.flip(state, dims=(-1,)), torch.flip(mcts_prob, dims=(-1,))
-        for k in range(4): # Rotation * 4
+        for k in range(2): # Rotation * 2
             S_ = torch.rot90(state, k, dims=(-2,-1))
             P_ = torch.rot90(mcts_prob, k, dims=(-2,-1)).reshape(-1)
             self.buffer.append((S_, P_, result))
 
-    def sample(self, batch_size:int):
+    def sample(self, batch_size:int, half=False):
         """Sample a batch randomly, then load to device"""
+        dtype = torch.half if half else torch.float
         batch = random.sample(self.buffer, batch_size)
         states, mctsProbs, results = zip(*batch)
-        states = torch.stack([s for s in states]).to(self.dv) # [C, sz, sz] -> [B, C, sz, sz]
-        mctsProbs = torch.stack([p for p in mctsProbs]).to(self.dv) # [sz*sz] -> [B, sz*sz]
-        results = torch.tensor(results, dtype=torch.float32).unsqueeze(1).to(self.dv) # num -> [B, 1]
+        states = torch.stack([s for s in states]).to(self.dv, dtype=dtype) # [C, sz, sz] -> [B, C, sz, sz]
+        mctsProbs = torch.stack([p for p in mctsProbs]).to(self.dv, dtype=dtype) # [sz*sz] -> [B, sz*sz]
+        results = torch.tensor(results).unsqueeze(1).to(self.dv, dtype=dtype) # num -> [B, 1]
         return states, mctsProbs, results
 
 if __name__ == "__main__":

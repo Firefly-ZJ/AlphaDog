@@ -27,13 +27,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else
 
 ### ----- Player Initialization ----- ###
 AImodel = "./trained/model_v0.1.pth" if True else None
+use_mcts = False
 
 player1 = PLAYER(1) if True else HumanPl(1)
-#player1 = AlphaDog(1, size, device, load_path=AImodel, num_simulations=100).playMode()
+#player1 = AlphaDog(1, size, device, load_path=AImodel, num_simulations=100).playMode(use_mcts)
 #player1 = BetaDog(1, num_simulations=2000)
 
 #player2 = PLAYER(2) if False else HumanPl(2)
-player2 = AlphaDog(2, size, device, load_path=AImodel, num_simulations=100).playMode()
+player2 = AlphaDog(2, size, device, load_path=AImodel, num_simulations=100).playMode(use_mcts)
 #player2 = BetaDog(2, num_simulations=2000)
 
 ### ****************************************

@@ -8,12 +8,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from torch import multiprocessing
-multiprocessing.set_sharing_strategy('file_system') ###
+multiprocessing.set_sharing_strategy("file_system") ###
 
 from _GomokuNet import GomokuNet
 from _GomokuBoard import *
 from _MCTS import *
-from _Dataset import Dataset
+#from _Dataset import Dataset
 from AlphaDog import AlphaDog
 
 class AlphaDogPara(AlphaDog):
@@ -30,65 +30,65 @@ class AlphaDogPara(AlphaDog):
         self.StartNew()
         states, mctsProbs = [], []
         # Self-Play A Game
-        with torch.no_grad():
-            while not board.GameEnd:
-                boardState = board.getStateAsT() # [1, C, sz, sz]
-                actionProbs = self.MCTS.search(board) # [sz*sz]
-                pos = self.selectAction(actionProbs, moveCount=len(board.moves))
-                if board.placeStone(pos // self.Size, pos % self.Size):
-                    states.append(boardState)
-                    mctsProbs.append(torch.from_numpy(actionProbs).float())
+        while not board.GameEnd:
+            boardState = torch.from_numpy(board.getState()).float().unsqueeze(0).to(self.dv)
+            actionProbs = self.MCTS.search(board) # [sz*sz]
+            pos, actionProbs = self.selectAction(actionProbs, len(board.moves), return_prob=True)
+            if board.placeStone(pos // self.Size, pos % self.Size):
+                states.append(boardState)
+                mctsProbs.append(torch.from_numpy(actionProbs).float().to(self.dv))
         result = 1 if board.Winner==1 else -1 if board.Winner==2 else 0
         # Return Data
         data = []
         for state, mctsProb in zip(states, mctsProbs): # old first
-            data.append((state.cpu(), mctsProb.cpu(), result))
+            data.append((state.cpu(), mctsProb.cpu(), result)) ### to cpu
             result = -result
         if not (result <= 0): raise RuntimeError("Wrong game result!")
         del states, mctsProbs
         return data
 
-    def CreateData(self, numGames:int, numPara:int=4):
+    def CreateData(self, num_games:int, num_para:int=4):
         """Create self-play data (support cuda multi-processing)
         Args:
-            numGames (int): num of self-play data to be created
-            numPara (int): num of parallel workers (if > 1)
+            num_games (int): num of self-play data to be created
+            num_para (int): num of parallel workers (if > 1)
         """
         self.Net.eval()
         with torch.no_grad():
-            if numPara > 1: ### Parallel Self-Play
-                modelDict = self.Net.state_dict()
-                args = [(modelDict, self.dv) for _ in range(numGames)]
-                with multiprocessing.Pool(numPara) as pool:
+            if num_para > 1: ### Parallel Self-Play
+                modelDict = {k:v.cpu() for k,v in self.Net.state_dict().items()} ### to cpu
+                args = [(modelDict, self.dv) for _ in range(num_games)]
+                with multiprocessing.Pool(num_para) as pool:
                     allData = pool.starmap(_selfplayWorker, args)
-            else: ### Sequential Self-Play (when numPara<=1)
+            else: ### Sequential Self-Play (when num_para<=1)
                 allData = []
-                for _ in range(numGames): allData.append(self._SelfPlay())
+                for _ in range(num_games): allData.append(self._SelfPlay())
         for data in allData: ### Update Replay Memory
             for state, mctsProb, result in data:
                 self.Memory.push(state, mctsProb, result)
         del allData
     
-    def TRAIN(self, num_epochs:int, num_games=64, lr=1e-3, batch_size=256):
+    def TRAIN(self, num_epochs:int, num_games=64, lr=1e-3, batch_size=256, num_para=4):
         """Train the model
         Args:
             num_epochs (int): number of training epochs
             num_games (int): number of self-play games per epoch
             lr (float): init learning rate
             batch_size (int): mini-batch size
+            num_para (int): number of parallel workers for self-play
         """
         print("Training...")
-        print(f"Epochs: {num_epochs}, Learning Rate: {lr},  Batch Size: {batch_size}\n")
+        print(f"Epochs: {num_epochs},  Learning Rate: {lr},  Batch Size: {batch_size}")
         optimizer = torch.optim.AdamW(self.Net.parameters(), lr=lr, weight_decay=1e-3)
-        #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.8)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda e: lr_lambda(e))
         
         for epoch in range(1, num_epochs+1):
-            print(f"Epoch: {epoch}/{num_epochs}")
+            print(f"\nEpoch: {epoch} / {num_epochs}")
             optimizer.zero_grad()
             t_start = time.time()
             
             ### Self-Play
-            self.CreateData(num_games, numPara=4)
+            self.CreateData(num_games, num_para)
             if not (len(self.Memory) > batch_size*2): continue
             else: print(f"Buffer: {len(self.Memory)}", end=",  ")
 
@@ -99,13 +99,12 @@ class AlphaDogPara(AlphaDog):
             lossSum = 0.0
             self.Net.train()
             optimizer.zero_grad()
-            while (counter <= 10) and (iters <= 100):
-                optimizer.zero_grad()
+            while (counter <= 5) and (iters <= 200):
                 states_batch, mctsProbs_batch, rewards_batch = self.Memory.sample(batch_size)
-                policy, value = self.evalState(states_batch)
+                policy, value = self.Net.forward(states_batch)
                 # LOSS: Policy-交叉熵损失 + Value-均方差损失 (+ WeightDecay)
-                policyLoss = torch.mean(torch.sum(-mctsProbs_batch * (policy.to(self.dv)), dim=1))
-                valueLoss = F.mse_loss(value.to(self.dv), rewards_batch)
+                policyLoss = torch.mean(torch.sum(-mctsProbs_batch * policy, dim=1))
+                valueLoss = F.mse_loss(value, rewards_batch)
                 loss = policyLoss + valueLoss
                 # Backward and Update
                 loss.backward()
@@ -117,22 +116,29 @@ class AlphaDogPara(AlphaDog):
                 if loss.item() >= bestLoss: counter += 1
                 else: bestLoss, counter = loss.item(), 0
                 optimizer.zero_grad()
-            #scheduler.step()
+            scheduler.step()
             print(f"Iters: {iters},  Time: {(time.time()-t_start)/60:.1f} min")
             print(f"Loss={lossSum/iters:.4f} ~ {bestLoss:.4f},  {policyLoss.item():.4f} + {valueLoss.item():.4f}")
-            if epoch % 5 == 0: self.Memory.clear() # clear old data
-            if epoch % 10 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
+            if epoch % 2 == 0: self.Memory.clear() # clear old data
+            if epoch % 5 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
             print()
         
         print("Training Completed")
 
 def _selfplayWorker(modelDict, device:torch.device):
     """Self-Play Worker (for parallel processing)"""
-    #torch.cuda.set_per_process_memory_fraction(0.2)
     player = AlphaDogPara(device=device) # new player, same net
     player.Net.load_state_dict(modelDict)
-    player.Net.eval()
-    return player._SelfPlay()
+    player.Net.eval().to(device)
+    data = player._SelfPlay()
+    del player
+    return data
+
+def lr_lambda(current_epoch:int, warmup:int=5) -> float:
+    """lr scheduler lambda function"""
+    if current_epoch < warmup:
+        return (current_epoch + 1) / warmup
+    else: return 1.0
 
 ###
 if __name__ == "__main__":
@@ -143,5 +149,5 @@ if __name__ == "__main__":
     print(f"Device: {device}")
     if torch.cuda.is_available(): print(torch.cuda.get_device_properties(0))
 
-    player = AlphaDogPara(device=device, load_path=None)
-    player.TRAIN(num_epochs=32, num_games=64)
+    player = AlphaDogPara(device=device, load_path=None, num_simulations=400, dataset_capacity=50000)
+    player.TRAIN(num_epochs=40, num_games=80, num_para=4)

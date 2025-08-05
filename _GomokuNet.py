@@ -19,7 +19,7 @@ class ResBlock(nn.Module):
         return h + x
 
 class GomokuNet(nn.Module):
-    def __init__(self, size=16, half=True):
+    def __init__(self, size=16, half=False):
         """Gomoku neural network: State -> Policy, Value"""
         super().__init__()
         self.size = size

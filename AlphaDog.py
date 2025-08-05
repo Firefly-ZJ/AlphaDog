@@ -30,42 +30,44 @@ class AlphaDog(PLAYER):
         self.dv = device if isinstance(device, torch.device) else torch.device(device)
         self.useMCTS = True ### Only active in Pygame playing!
         ### Net and MCTS
-        self.Net = GomokuNet(size, half=True).to(self.dv)
+        self.Net = GomokuNet(size).to(self.dv)
         if load_path: self.Net.load_state_dict(torch.load(load_path, map_location="cpu", weights_only=True))
+        self.Net.eval().to(self.dv)
         self.MCTS = MCTS(self.Net, num_simulations, device=self.dv)
         self.Memory = Dataset(self.dv, capacity=dataset_capacity)
         ### Hyper-parameters
         self.tem = 1.01 # Temperature param (1/tau): visitCounts = visitCounts ** self.tem
         self.noise = True # Add Dirichlet Noise
-        self.eps = 0.2 # Dir-Noise fraction: P(s,a) = (1-eps)*p(a) + eps*Dir(alpha)
+        self.eps = 0.1 # Dir-Noise fraction: P(s,a) = (1-eps)*p(a) + eps*Dir(alpha)
     
     def StartNew(self):
+        """Start a new game (reset MCTS state)"""
         self.MCTS.reset()
     
-    def selectAction(self, probs:np.ndarray, moveCount:int=0) -> int:
-        """Select an action based on probability (with Tau and Dir-noise)"""
+    def selectAction(self, probs:np.ndarray, move_count:int=0, return_prob=False):
+        """Select an action based on probability (with Tau and Dir-noise)
+        Args:
+            probs (np.ndarray): action probabilities from MCTS
+            move_count (int): current move number (for temperature)
+            return_prob (bool): whether to return modified probabilities (default: False)
+        """
         ### Temperature
         addTem = 20 # start to add temperature
-        if moveCount <= addTem: pass
+        if move_count <= addTem: pass
         else:
-            temperature = self.tem ** (moveCount-addTem)
-            if temperature <= 30: # t=1.05 -> step=70
-                probs = probs ** temperature
-                probs = probs / np.sum(probs)
-            else:
-                pos = np.argmax(probs)
-                probs = np.zeros_like(probs)
-                probs[pos] = 1.0
+            temperature = self.tem ** (move_count-addTem)
+            probs = probs ** temperature
+            probs = probs / np.sum(probs)
         ### Dirichlet Noise
         if self.noise:
             probs = (1-self.eps) * probs + self.eps * np.random.dirichlet([0.1]*len(probs))
         action = np.random.choice(len(probs), p=probs)
-        return action
+        return (action, probs) if return_prob else action
     
     def TakeAction(self, board:GomokuBoard) -> tuple:
         """Take an action: Board -> (r,c)"""
         actionProbs = self.MCTS.search(board)
-        pos = self.selectAction(actionProbs, moveCount=len(board.moves))
+        pos = self.selectAction(actionProbs, move_count=len(board.moves))
         return pos // self.Size, pos % self.Size
     
     def playMode(self, useMCTS=True) -> 'AlphaDog':
@@ -80,8 +82,8 @@ class AlphaDog(PLAYER):
         if self.useMCTS: # use MCTS search
             return self.TakeAction(board)
         else: # no search, only P-V net
-            state = torch.from_numpy(board.getState()).half().unsqueeze(0).to(self.dv)
-            policy, value = self.Net(state)
+            state = torch.from_numpy(board.getState()).float().unsqueeze(0).to(self.dv)
+            policy, _ = self.Net.forward(state)
             policy = torch.exp(policy.squeeze())
             pos = torch.multinomial(policy, 1).item()
             return pos // self.Size, pos % self.Size
@@ -93,13 +95,13 @@ class AlphaDog(PLAYER):
         states, mctsProbs = [], []
         # Self-Play A Game
         while not board.GameEnd:
-            boardState = torch.from_numpy(board.getState()).half().unsqueeze(0).to(self.dv)
+            boardState = torch.from_numpy(board.getState()).float().unsqueeze(0).to(self.dv)
             actionProbs = self.MCTS.search(board) # [sz*sz]
-            pos = self.selectAction(actionProbs, moveCount=len(board.moves))
+            pos, actionProbs = self.selectAction(actionProbs, len(board.moves), return_prob=True)
             if board.placeStone(pos // self.Size, pos % self.Size):
                 states.append(boardState)
-                mctsProbs.append(torch.from_numpy(actionProbs).half().to(self.dv))
-        result = 1 if board.Winner == 1 else -1 if board.Winner==2 else 0
+                mctsProbs.append(torch.from_numpy(actionProbs).float().to(self.dv))
+        result = 1 if board.Winner==1 else -1 if board.Winner==2 else 0
         # Update Replay Memory (one for each move)
         for state, mctsProb in zip(states, mctsProbs): # old first
             self.Memory.push(state, mctsProb, result)
@@ -125,9 +127,9 @@ class AlphaDog(PLAYER):
             batch_size (int): mini-batch size
         """
         print("Training...")
-        print(f"Epochs: {num_epochs}, Learning Rate: {lr},  Batch Size: {batch_size}")
+        print(f"Epochs: {num_epochs},  Learning Rate: {lr},  Batch Size: {batch_size}")
         optimizer = torch.optim.AdamW(self.Net.parameters(), lr=lr, weight_decay=1e-3)
-        #scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)
+        scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lambda e: lr_lambda(e))
         
         for epoch in range(1, num_epochs+1):
             print(f"\nEpoch: {epoch} / {num_epochs}")
@@ -146,13 +148,12 @@ class AlphaDog(PLAYER):
             lossSum = 0.0
             self.Net.train()
             optimizer.zero_grad()
-            while (counter <= 10) and (iters <= 100):
-                optimizer.zero_grad()
+            while (counter <= 5) and (iters <= 200):
                 states_batch, mctsProbs_batch, rewards_batch = self.Memory.sample(batch_size)
-                policy, value = self.evalState(states_batch)
+                policy, value = self.Net.forward(states_batch)
                 # LOSS: Policy-交叉熵损失 + Value-均方差损失 (+ WeightDecay)
-                policyLoss = torch.mean(torch.sum(-mctsProbs_batch * (policy.to(self.dv)), dim=1))
-                valueLoss = F.mse_loss(value.to(self.dv), rewards_batch)
+                policyLoss = torch.mean(torch.sum(-mctsProbs_batch * policy, dim=1))
+                valueLoss = F.mse_loss(value, rewards_batch)
                 loss = policyLoss + valueLoss
                 # Backward and Update
                 loss.backward()
@@ -164,19 +165,25 @@ class AlphaDog(PLAYER):
                 if loss.item() >= bestLoss: counter += 1
                 else: bestLoss, counter = loss.item(), 0
                 optimizer.zero_grad()
-            #scheduler.step()
+            scheduler.step()
             print(f"Iters: {iters},  Time: {(time.time()-t_start)/60:.1f} min")
             print(f"Loss = {lossSum/iters:.4f} ~ {bestLoss:.4f}  ({policyLoss.item():.4f} + {valueLoss.item():.4f})")
-            if epoch % 5 == 0: self.Memory.clear() # clear old data
-            if epoch % 2 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
+            if epoch % 2 == 0: self.Memory.clear() # clear old data
+            if epoch % 5 == 0: self.SaveModel(rootPath+f"model_{epoch}.pth") # save model
         
         print("\nTraining Completed")
 
+def lr_lambda(current_epoch:int, warmup:int=5) -> float:
+    """lr scheduler lambda function"""
+    if current_epoch < warmup:
+        return (current_epoch + 1) / warmup
+    else: return 1.0
+    
 if __name__ == "__main__":
     rootPath = "./"
     device = torch.device("cuda" if torch.cuda.is_available() else
                           "xpu" if torch.xpu.is_available() else "cpu")
     print(f"Device: {device}")
 
-    player = AlphaDog(device=device, num_simulations=100)
-    player.TRAIN(num_epochs=20, num_games=4, lr=5e-4, batch_size=64)
+    player = AlphaDog(device=device, num_simulations=400)
+    player.TRAIN(num_epochs=40, num_games=24, lr=1e-3, batch_size=256)

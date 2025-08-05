@@ -43,6 +43,7 @@ Data buffer is cleared every 5 epoches.
 #### Version 0 (2025/02):
 - **Ver 0.1 - 2025/07**: Code optimization, no change in model.
 - **2025/08**: Convert to half precision to accelerate.
+- **2025/08**: Convert back to float32, for half is not so friendly for training (may be supported in later versions). (>_<)
 
 ## License
 
